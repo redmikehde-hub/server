@@ -1,0 +1,505 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  SUB_ADMIN
+  SUPER_ADMIN
+}
+
+enum WithdrawStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  BONUS
+  WINNING
+  GAME_BET
+  GAME_WIN
+}
+
+enum PaymentMethodType {
+  UPI
+  BANK
+  CARD
+  WALLET
+}
+
+enum NotificationType {
+  WIN
+  DEPOSIT
+  WITHDRAW
+  BONUS
+  ACHIEVEMENT
+  SYSTEM
+  LEADERBOARD
+}
+
+enum AchievementType {
+  GAMES_PLAYED
+  GAMES_WON
+  SINGLE_WIN
+  STREAK
+  DEPOSIT
+  REFERRAL
+  DAILY_LOGIN
+}
+
+enum BonusType {
+  WELCOME
+  DAILY
+  DEPOSIT
+  CASHBACK
+  REFER
+  PROMO
+}
+
+enum BonusStatus {
+  PENDING
+  ACTIVE
+  USED
+  EXPIRED
+}
+
+enum CoinTransactionType {
+  DEPOSIT
+  GAME_WIN
+  GAME_LOSS
+  BONUS
+  REFERRAL_BONUS
+  WITHDRAWAL
+  PROMO
+}
+
+enum GameResult {
+  WIN
+  LOSS
+  DRAW
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  phone        String?  @unique
+  password     String?
+  role         Role     @default(USER)
+  googleId     String?  @unique
+  balance      Float    @default(0)
+  bonusBalance Float    @default(0)
+  totalWinnings Float  @default(0)
+  gamesPlayed   Int     @default(0)
+  gamesWon      Int     @default(0)
+  referralCode  String  @unique
+  referredBy   String?
+  streak       Int     @default(0)
+  lastLoginAt  DateTime?
+  totalDeposited Float  @default(0)
+  totalWithdrawn Float  @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  paymentMethods    PaymentMethod[]
+  withdrawRequests  WithdrawRequest[]  @relation("UserWithdrawals")
+  transactions      Transaction[]
+  notifications     Notification[]
+  achievements      UserAchievement[]
+  bonusClaims       BonusClaim[]
+  referredByUser    User?              @relation("Referral", fields: [referredBy], references: [id])
+  referrals         User[]             @relation("Referral")
+  gameHistories     GameHistory[]
+  coinTransactions  CoinTransaction[]
+  referralRewards    ReferralReward[]   @relation("ReferrerRewards")
+  referredRewards    ReferralReward[]   @relation("ReferredRewards")
+  usedBonusCodes    UsedBonusCode[]
+  ludoGames         LudoGame[]         @relation("UserLudoGames")
+
+  @@map("users")
+}
+
+model PaymentMethod {
+  id             String           @id @default(uuid())
+  userId         String
+  type           PaymentMethodType
+  label          String
+  value          String
+  isPrimary      Boolean          @default(false)
+  isVerified     Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawRequests WithdrawRequest[]
+
+  @@map("payment_methods")
+}
+
+model WithdrawRequest {
+  id              String         @id @default(uuid())
+  userId          String
+  amount          Float
+  status          WithdrawStatus @default(PENDING)
+  remark          String?
+  paymentMethodId String?
+  processedBy     String?
+  processedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user          User           @relation("UserWithdrawals", fields: [userId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+
+  @@map("withdraw_requests")
+}
+
+model Transaction {
+  id        String          @id @default(uuid())
+  userId    String
+  type      TransactionType
+  amount    Float
+  remark    String?
+  gameId    String?
+  createdAt DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+model Game {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  category    String
+  minBet      Float    @default(1)
+  maxBet      Float    @default(10000)
+  maxWin      Float    @default(100000)
+  color       String   @default("#f97316")
+  image       String?
+  icon        String   @default("Star")
+  isHot       Boolean  @default(false)
+  isFeatured  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  players     Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rounds GameRound[]
+
+  @@map("games")
+}
+
+model GameRound {
+  id        String   @id @default(uuid())
+  gameId    String
+  result    String?
+  multiplier Float?
+  status    String   @default("OPEN")
+  startTime DateTime @default(now())
+  endTime   DateTime?
+  createdAt DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@map("game_rounds")
+}
+
+model GameBet {
+  id        String   @id @default(uuid())
+  userId    String
+  gameId    String
+  roundId   String?
+  amount    Float
+  selection String?
+  odds      Float?
+  status    String   @default("PENDING")
+  winAmount Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("game_bets")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  data      String?
+  isRead    Boolean         @default(false)
+  createdAt DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Achievement {
+  id          String         @id @default(uuid())
+  name        String         @unique
+  description String
+  icon        String
+  type        AchievementType
+  target      Int
+  reward      Float
+  rarity      String         @default("Common")
+  color       String         @default("#6b7280")
+  createdAt   DateTime       @default(now())
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String    @id @default(uuid())
+  userId        String
+  achievementId String
+  progress      Int       @default(0)
+  isUnlocked    Boolean   @default(false)
+  unlockedAt    DateTime?
+  rewardClaimed Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+
+  @@map("user_achievements")
+}
+
+model Bonus {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  type        BonusType
+  title       String
+  description String
+  minDeposit  Float?
+  maxBonus   Float?
+  percentage  Float
+  reward      Float
+  expiresAt   DateTime?
+  isActive    Boolean    @default(true)
+  maxClaims   Int?
+  claims      Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  bonusClaims BonusClaim[]
+
+  @@map("bonuses")
+}
+
+model BonusClaim {
+  id        String      @id @default(uuid())
+  userId    String
+  bonusId   String
+  status    BonusStatus @default(PENDING)
+  amount    Float
+  deposited Float?
+  createdAt DateTime    @default(now())
+  usedAt    DateTime?
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bonus Bonus @relation(fields: [bonusId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bonusId])
+
+  @@map("bonus_claims")
+}
+
+model Leaderboard {
+  id        String   @id @default(uuid())
+  userId    String
+  userName  String
+  userImage String?
+  period    String   @default("monthly")
+  winnings  Float
+  rank      Int
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, period])
+
+  @@map("leaderboard")
+}
+
+model GameHistory {
+  id          String     @id @default(uuid())
+  userId      String
+  gameName    String
+  gameId      String?
+  betAmount   Float
+  result      GameResult
+  winAmount   Float      @default(0)
+  multiplier  Float      @default(1)
+  selection   String?
+  createdAt   DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("game_history")
+}
+
+model CoinTransaction {
+  id          String            @id @default(uuid())
+  userId      String
+  type        CoinTransactionType
+  amount      Float
+  balanceBefore Float
+  balanceAfter  Float
+  remark      String?
+  referenceId String?
+  createdAt   DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("coin_transactions")
+}
+
+model BonusCode {
+  id           String    @id @default(uuid())
+  code         String    @unique
+  coinAmount   Float
+  discountPercent Float  @default(0)
+  description  String
+  isActive     Boolean   @default(true)
+  maxUses      Int?
+  usedCount    Int       @default(0)
+  minDeposit   Float?
+  startsAt     DateTime?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  createdBy    String?
+
+  usedCodes    UsedBonusCode[]
+
+  @@map("bonus_codes")
+}
+
+model UsedBonusCode {
+  id          String    @id @default(uuid())
+  userId      String
+  bonusCodeId String
+  coinsAwarded Float
+  createdAt   DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bonusCode BonusCode @relation(fields: [bonusCodeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bonusCodeId])
+  @@map("used_bonus_codes")
+}
+
+model ReferralReward {
+  id           String    @id @default(uuid())
+  referrerId   String
+  referredId   String
+  type         String
+  amount       Float
+  createdAt    DateTime  @default(now())
+
+  referrer User @relation("ReferrerRewards", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred User @relation("ReferredRewards", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@map("referral_rewards")
+}
+
+model DepositPlan {
+  id          String   @id @default(uuid())
+  name        String
+  rupees      Float
+  coins       Float
+  bonus       Float    @default(0)
+  isPopular   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("deposit_plans")
+}
+
+enum BroadcastType {
+  GENERAL
+  BONUS
+  PROMO
+  MAINTENANCE
+  UPDATE
+}
+
+model BroadcastNotification {
+  id         String        @id @default(uuid())
+  title      String
+  message    String
+  type       BroadcastType @default(GENERAL)
+  bonusCode  String?
+  bonusCoins Float?
+  createdBy  String?
+  createdAt  DateTime     @default(now())
+
+  @@map("broadcast_notifications")
+}
+
+model UserBroadcast {
+  id          String   @id @default(uuid())
+  userId      String
+  broadcastId String
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, broadcastId])
+
+  @@map("user_broadcasts")
+}
+
+enum LudoPlayer {
+  USER
+  AI
+}
+
+enum LudoDifficulty {
+  EASY
+  MEDIUM
+}
+
+enum LudoGameStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+model LudoGame {
+  id           String         @id @default(uuid())
+  userId       String
+  betAmount    Float
+  difficulty   LudoDifficulty @default(EASY)
+  status       LudoGameStatus @default(PENDING)
+  playerTurn   LudoPlayer     @default(USER)
+  userWin     Boolean?
+  reward      Float          @default(0)
+  gameState   String?        @db.Text
+  startedAt   DateTime?     @default(now())
+  endedAt     DateTime?
+  createdAt   DateTime       @default(now())
+
+  user User @relation("UserLudoGames", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("ludo_games")
+}
