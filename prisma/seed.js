@@ -279,7 +279,7 @@ async function main() {
           isHot: true, 
           isFeatured: true, 
           players: 500000,
-          image: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=400&h=400&fit=crop'
+          image: 'https://images.unsplash.com/photo-1606503153255-59d8b8b82176?w=400&h=500&fit=crop'
         },
         { 
           name: 'Teen Patti', 
@@ -292,7 +292,8 @@ async function main() {
           icon: 'Cards', 
           isHot: true, 
           isFeatured: false, 
-          players: 250000
+          players: 250000,
+          image: 'https://images.unsplash.com/photo-1529674188779-823f8db2c170?w=400&h=500&fit=crop'
         },
         { 
           name: 'Andar Bahar', 
@@ -305,7 +306,8 @@ async function main() {
           icon: 'Sparkles', 
           isHot: true, 
           isFeatured: false, 
-          players: 200000
+          players: 200000,
+          image: 'https://images.unsplash.com/photo-1606167668584-78701c57f13d?w=400&h=500&fit=crop'
         },
         { 
           name: 'Rummy', 
@@ -318,7 +320,8 @@ async function main() {
           icon: 'Layers', 
           isHot: false, 
           isFeatured: true, 
-          players: 150000
+          players: 150000,
+          image: 'https://images.unsplash.com/photo-1549488344-1f9b8d2bd1f3?w=400&h=500&fit=crop'
         }
       ]
     });
