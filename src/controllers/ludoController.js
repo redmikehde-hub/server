@@ -635,3 +635,53 @@ export async function forfeitGame(req, res) {
     res.status(500).json({ error: 'Failed to forfeit game' });
   }
 }
+
+export async function startMultiplayer(req, res) {
+  try {
+    const userId = req.user.id;
+    const { betAmount } = req.body;
+    
+    if (!betAmount || betAmount <= 0) {
+      return res.status(400).json({ error: 'Invalid bet amount' });
+    }
+    
+    if (betAmount < 10 || betAmount > 10000) {
+      return res.status(400).json({ error: 'Bet amount must be between 10 and 10000' });
+    }
+    
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (user.balance < betAmount) {
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    
+    const game = await prisma.ludoGame.create({
+      data: {
+        userId,
+        betAmount,
+        difficulty: 'MEDIUM',
+        status: 'PENDING',
+        gameState: JSON.stringify({
+          mode: 'multiplayer',
+          matchmaking: true,
+          createdBy: userId,
+        })
+      }
+    });
+    
+    res.json({
+      success: true,
+      gameId: game.id,
+      betAmount,
+      message: 'Added to matchmaking queue'
+    });
+    
+  } catch (error) {
+    console.error('Start multiplayer error:', error);
+    res.status(500).json({ error: 'Failed to start multiplayer game', details: error.message });
+  }
+}

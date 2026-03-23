@@ -19,6 +19,9 @@ import bonusRoutes from './src/routes/bonus.js';
 import referralRoutes from './src/routes/referral.js';
 import broadcastRoutes from './src/routes/broadcast.js';
 import ludoRoutes from './src/routes/ludo.js';
+import matkaRoutes from './src/routes/matka.js';
+import aviatorRoutes from './src/routes/aviator.js';
+import sportRoutes from './src/routes/sport.js';
 import { PrismaClient } from '@prisma/client';
 import { depositService } from './src/services/depositService.js';
 import { bonusService } from './src/services/bonusService.js';
@@ -30,17 +33,26 @@ const server = http.createServer(app);
 
 const io = initializeSocket(server);
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://casinov1demo.netlify.app',
+  'https://*.netlify.app',
+  config.frontendUrl,
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(cors({
   origin: function(origin, callback) {
     if (!origin) return callback(null, true);
     if (
-      origin.includes('localhost') || 
+      origin.includes('localhost') ||
       origin.includes('127.0.0.1') ||
-      origin === config.frontendUrl
+      origin.includes('netlify.app')
     ) {
       return callback(null, true);
     }
-    callback(new Error('Not allowed by CORS'));
+    callback(null, true);
   },
   credentials: true
 }));
@@ -66,6 +78,9 @@ app.use('/api/bonus', bonusRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/broadcast', broadcastRoutes);
 app.use('/api/ludo', ludoRoutes);
+app.use('/api/matka', matkaRoutes);
+app.use('/api/aviator', aviatorRoutes);
+app.use('/api/sport', sportRoutes);
 
 app.use((err, req, res, next) => {
   console.error('Error:', err);

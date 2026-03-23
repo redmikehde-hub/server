@@ -504,3 +504,37 @@ model LudoGame {
   @@index([status])
   @@map("ludo_games")
 }
+
+model MatkaGame {
+  id            String    @id @default(uuid())
+  roundNumber   Int       @default(1)
+  result        String?
+  status        String    @default("WAITING")
+  startTime     DateTime  @default(now())
+  endTime       DateTime?
+  createdAt     DateTime  @default(now())
+
+  bets MatkaBet[]
+
+  @@index([status])
+  @@map("matka_games")
+}
+
+model MatkaBet {
+  id              String     @id @default(uuid())
+  userId          String
+  gameId          String
+  betAmount       Float
+  selectedNumber  String
+  betType         String
+  result          String?
+  isWin           Boolean    @default(false)
+  reward          Float      @default(0)
+  createdAt       DateTime   @default(now())
+
+  game MatkaGame @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([gameId])
+  @@map("matka_bets")
+}

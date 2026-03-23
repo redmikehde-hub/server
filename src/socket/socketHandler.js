@@ -2,35 +2,24 @@ import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { initializeAviator, getAviatorStateForUser } from './aviatorService.js';
 
 const prisma = new PrismaClient();
-let io;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+const PLAYER_COLORS = ['palegreen', 'royalblue'];
 
 const MATCHMAKING_QUEUE = new Map();
 const ACTIVE_GAMES = new Map();
 
-export function initializeSocket(server) {
-  io = new Server(server, {
+const initializeSocket = (server) => {
+  const io = new Server(server, {
     cors: {
-      origin: function(origin, callback) {
-        if (!origin) return callback(null, true);
-        if (
-          origin.includes('localhost') || 
-          origin.includes('127.0.0.1') ||
-          origin.includes('netlify.app')
-        ) {
-          return callback(null, true);
-        }
-        callback(null, true);
-      },
-      credentials: true
-    }
+      origin: process.env.FRONTEND_URL || '*',
+      methods: ['GET', 'POST'],
+      credentials: true,
+    },
   });
-
-  initializeAviator(io);
 
   io.use(async (socket, next) => {
     try {
@@ -56,26 +45,7 @@ export function initializeSocket(server) {
   io.on('connection', (socket) => {
     console.log(`User connected: ${socket.user.name} (${socket.user.id})`);
     
-    socket.on('join', (userId) => {
-      socket.join(`user_${userId}`);
-      console.log(`👤 User ${userId} joined their room`);
-    });
-
-    socket.on('leave', (userId) => {
-      socket.leave(`user_${userId}`);
-      console.log(`👤 User ${userId} left their room`);
-    });
-
-    socket.on('aviator:join', () => {
-      socket.join('aviator');
-      socket.emit('aviator:state', getAviatorStateForUser(socket.user.id));
-    });
-
-    socket.on('aviator:leave', () => {
-      socket.leave('aviator');
-    });
-
-    socket.on('join_matchmaking', async ({ betAmount }) => {
+    socket.on('join_matchmaking', async ({ gameId, betAmount }) => {
       try {
         if (socket.user.balance < betAmount) {
           socket.emit('error', { message: 'Insufficient balance' });
@@ -98,14 +68,14 @@ export function initializeSocket(server) {
           const opponent = queue.shift();
           
           if (opponent.socketId === socket.id) {
-            queue.push({ socketId: socket.id, userId: socket.user.id, name: socket.user.name, betAmount });
+            queue.push({ socketId: socket.id, userId: socket.user.id, name: socket.user.name, betAmount, gameId });
             socket.emit('waiting_for_match');
             return;
           }
 
           const opponentSocket = io.sockets.sockets.get(opponent.socketId);
           if (!opponentSocket) {
-            queue.push({ socketId: socket.id, userId: socket.user.id, name: socket.user.name, betAmount });
+            queue.push({ socketId: socket.id, userId: socket.user.id, name: socket.user.name, betAmount, gameId });
             socket.emit('waiting_for_match');
             return;
           }
@@ -137,13 +107,13 @@ export function initializeSocket(server) {
           opponentSocket.join(newGameId);
           opponentSocket.gameId = newGameId;
 
-          await deductBetFromPlayers([opponent.userId, socket.user.id], betAmount);
+          await createGameInDB(newGameId, [opponent.userId, socket.user.id], betAmount);
 
           socket.emit('match_found', { game: gameData, players: gameData.players });
           opponentSocket.emit('match_found', { game: gameData, players: gameData.players });
 
         } else {
-          queue.push({ socketId: socket.id, userId: socket.user.id, name: socket.user.name, betAmount });
+          queue.push({ socketId: socket.id, userId: socket.user.id, name: socket.user.name, betAmount, gameId });
           socket.emit('waiting_for_match');
         }
 
@@ -170,8 +140,8 @@ export function initializeSocket(server) {
         return;
       }
 
-      const currentPlayerData = game.players.find(p => p.userId === socket.user.id);
-      if (!currentPlayerData || currentPlayerData.color !== game.currentTurn) {
+      const currentPlayer = game.players.find(p => p.userId === socket.user.id);
+      if (!currentPlayer || currentPlayer.color !== game.currentTurn) {
         socket.emit('error', { message: 'Not your turn' });
         return;
       }
@@ -192,8 +162,8 @@ export function initializeSocket(server) {
         return;
       }
 
-      const currentPlayerData = game.players.find(p => p.userId === socket.user.id);
-      if (!currentPlayerData || currentPlayerData.color !== game.currentTurn) {
+      const currentPlayer = game.players.find(p => p.userId === socket.user.id);
+      if (!currentPlayer || currentPlayer.color !== game.currentTurn) {
         socket.emit('error', { message: 'Not your turn' });
         return;
       }
@@ -236,7 +206,7 @@ export function initializeSocket(server) {
     });
 
     socket.on('leave_game', ({ gameId }) => {
-      handlePlayerLeave(socket, gameId);
+      handlePlayerLeave(socket, gameId, io);
     });
 
     socket.on('disconnect', () => {
@@ -250,13 +220,13 @@ export function initializeSocket(server) {
       }
 
       if (socket.gameId) {
-        handlePlayerLeave(socket, socket.gameId);
+        handlePlayerLeave(socket, socket.gameId, io);
       }
     });
   });
 
   return io;
-}
+};
 
 function getInitialCoinState() {
   return {
@@ -275,7 +245,7 @@ function getInitialCoinState() {
   };
 }
 
-async function deductBetFromPlayers(playerIds, betAmount) {
+async function createGameInDB(gameId, playerIds, betAmount) {
   try {
     for (const userId of playerIds) {
       const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -298,7 +268,7 @@ async function deductBetFromPlayers(playerIds, betAmount) {
       }
     }
   } catch (error) {
-    console.error('Error deducting bet:', error);
+    console.error('Error creating game in DB:', error);
   }
 }
 
@@ -360,7 +330,7 @@ async function handleGameEnd(gameId, winnerColor, betAmount) {
   }
 }
 
-function handlePlayerLeave(socket, gameId) {
+function handlePlayerLeave(socket, gameId, io) {
   const game = ACTIVE_GAMES.get(gameId);
   if (!game) return;
 
@@ -474,61 +444,4 @@ function checkWin(game, color) {
   return Object.values(tokens).every(t => t.position.includes('won'));
 }
 
-export function getIO() {
-  return io;
-}
-
-export async function broadcastNotification(title, message, type = 'GENERAL', bonusCode = null, bonusCoins = null, createdBy = null) {
-  try {
-    const broadcast = await prisma.broadcastNotification.create({
-      data: {
-        title,
-        message,
-        type,
-        bonusCode,
-        bonusCoins,
-        createdBy
-      }
-    });
-
-    if (io) {
-      io.emit('new_notification', {
-        id: broadcast.id,
-        title,
-        message,
-        type,
-        bonusCode,
-        bonusCoins,
-        createdAt: broadcast.createdAt
-      });
-    }
-
-    return broadcast;
-  } catch (error) {
-    console.error('Broadcast error:', error);
-    throw error;
-  }
-}
-
-export async function notifyUser(userId, title, message, type = 'GENERAL', data = null) {
-  try {
-    const notification = await prisma.notification.create({
-      data: {
-        userId,
-        title,
-        message,
-        type,
-        data: data ? JSON.stringify(data) : null
-      }
-    });
-
-    if (io) {
-      io.to(`user_${userId}`).emit('new_notification', notification);
-    }
-
-    return notification;
-  } catch (error) {
-    console.error('Notify user error:', error);
-    throw error;
-  }
-}
+export default initializeSocket;

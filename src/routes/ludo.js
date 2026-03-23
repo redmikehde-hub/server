@@ -5,6 +5,7 @@ import * as ludoController from '../controllers/ludoController.js';
 const router = express.Router();
 
 router.post('/start', authenticate, ludoController.startGame);
+router.post('/start-multiplayer', authenticate, ludoController.startMultiplayer);
 router.get('/history', authenticate, ludoController.getGameHistory);
 router.get('/:gameId', authenticate, ludoController.getGameState);
 router.post('/:gameId/roll', authenticate, ludoController.rollDice);
