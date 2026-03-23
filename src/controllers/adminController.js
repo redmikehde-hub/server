@@ -1,4 +1,5 @@
 import { userService } from '../services/userService.js';
+import { isDatabaseUnavailable, logDatabaseWarningOnce, sendDatabaseUnavailable } from '../utils/databaseFallback.js';
 
 export const adminController = {
   async createSubAdmin(req, res) {
@@ -35,6 +36,10 @@ export const adminController = {
         }
       });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('admin:create-subadmin', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Create subadmin error:', error);
       res.status(500).json({ error: 'Failed to create sub-admin.' });
     }
@@ -60,6 +65,15 @@ export const adminController = {
         totalWithdrawalAmount: totalWithdrawalAmount._sum.amount || 0
       });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('admin:get-stats', error);
+        return sendDatabaseUnavailable(res, {
+          totalUsers: 0,
+          totalWithdrawals: 0,
+          pendingWithdrawals: 0,
+          totalWithdrawalAmount: 0,
+        });
+      }
       console.error('Get stats error:', error);
       res.status(500).json({ error: 'Failed to fetch stats.' });
     }

@@ -1,4 +1,5 @@
 import { userService } from '../services/userService.js';
+import { isDatabaseUnavailable, logDatabaseWarningOnce, sendDatabaseUnavailable } from '../utils/databaseFallback.js';
 
 export const userController = {
   async getMe(req, res) {
@@ -9,6 +10,10 @@ export const userController = {
       }
       res.json({ user });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('user:get-me', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Get me error:', error);
       res.status(500).json({ error: 'Failed to fetch user.' });
     }
@@ -31,6 +36,10 @@ export const userController = {
       const user = await userService.update(req.user.id, updates);
       res.json({ message: 'Profile updated.', user });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('user:update-profile', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Update profile error:', error);
       res.status(500).json({ error: 'Failed to update profile.' });
     }
@@ -47,6 +56,10 @@ export const userController = {
       );
       res.json(result);
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('user:get-all', error);
+        return sendDatabaseUnavailable(res, { users: [], total: 0, page: 1, limit: 20, totalPages: 0 });
+      }
       console.error('Get all users error:', error);
       res.status(500).json({ error: 'Failed to fetch users.' });
     }
@@ -60,6 +73,10 @@ export const userController = {
       }
       res.json({ user });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('user:get-by-id', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Get user by id error:', error);
       res.status(500).json({ error: 'Failed to fetch user.' });
     }
@@ -88,6 +105,10 @@ export const userController = {
 
       res.json({ message: 'Password changed successfully.' });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('user:change-password', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Change password error:', error);
       res.status(500).json({ error: 'Failed to change password.' });
     }
@@ -102,6 +123,10 @@ export const userController = {
       const users = await userService.search(q);
       res.json({ users });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('user:search', error);
+        return sendDatabaseUnavailable(res, { users: [] });
+      }
       console.error('Search error:', error);
       res.status(500).json({ error: 'Failed to search users.' });
     }

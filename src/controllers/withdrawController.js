@@ -1,6 +1,7 @@
 import { withdrawService, transactionService } from '../services/transactionService.js';
 import { userService } from '../services/userService.js';
 import { PrismaClient } from '@prisma/client';
+import { isDatabaseUnavailable, logDatabaseWarningOnce, sendDatabaseUnavailable } from '../utils/databaseFallback.js';
 
 const prisma = new PrismaClient();
 
@@ -31,6 +32,10 @@ export const withdrawController = {
         request
       });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('withdraw:request', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Withdraw request error:', error);
       res.status(500).json({ error: 'Failed to submit withdrawal request.' });
     }
@@ -48,6 +53,10 @@ export const withdrawController = {
 
       res.json({ ...result, requests });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('withdraw:get-my-requests', error);
+        return sendDatabaseUnavailable(res, { requests: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } });
+      }
       console.error('Get my requests error:', error);
       res.status(500).json({ error: 'Failed to fetch requests.' });
     }
@@ -59,6 +68,10 @@ export const withdrawController = {
       const result = await withdrawService.getAll(status, parseInt(page), parseInt(limit));
       res.json(result);
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('withdraw:get-all', error);
+        return sendDatabaseUnavailable(res, { requests: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } });
+      }
       console.error('Get all requests error:', error);
       res.status(500).json({ error: 'Failed to fetch requests.' });
     }
@@ -99,6 +112,10 @@ export const withdrawController = {
 
       res.json({ message: 'Withdrawal request approved and processed.' });
     } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        logDatabaseWarningOnce('withdraw:update-status', error);
+        return sendDatabaseUnavailable(res);
+      }
       console.error('Update status error:', error);
       res.status(500).json({ error: 'Failed to update request.' });
     }

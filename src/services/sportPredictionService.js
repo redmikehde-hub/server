@@ -2,118 +2,158 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-const MATCH_INTERVAL_MS = 12 * 60 * 1000;
-const MATCH_DURATION_MS = 9 * 60 * 1000;
-
-const baseMatches = [
-  {
-    id: 'sport-1',
-    league: 'Premier Clash',
-    sport: 'Football',
-    teamA: 'Mumbai Strikers',
-    teamB: 'Delhi Royals',
-    predictionOdds: { TEAM_A: 1.95, DRAW: 3.4, TEAM_B: 2.1 },
-    tags: ['HOT', 'PREMIUM'],
-    banner: 'https://images.unsplash.com/photo-1547347298-4074fc3086f0?w=1200&h=800&fit=crop',
-  },
-  {
-    id: 'sport-2',
-    league: 'Cricket Power Cup',
-    sport: 'Cricket',
-    teamA: 'Chennai Blazers',
-    teamB: 'Bengal Tigers',
-    predictionOdds: { TEAM_A: 1.82, DRAW: 4.2, TEAM_B: 2.28 },
-    tags: ['POPULAR'],
-    banner: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=1200&h=800&fit=crop',
-  },
-  {
-    id: 'sport-3',
-    league: 'Night Derby',
-    sport: 'Football',
-    teamA: 'Goa Waves',
-    teamB: 'Pune Falcons',
-    predictionOdds: { TEAM_A: 2.18, DRAW: 3.18, TEAM_B: 1.88 },
-    tags: ['LIVE'],
-    banner: 'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=1200&h=800&fit=crop',
-  },
-  {
-    id: 'sport-4',
-    league: 'T20 Thunder',
-    sport: 'Cricket',
-    teamA: 'Hyderabad Storm',
-    teamB: 'Punjab Smash',
-    predictionOdds: { TEAM_A: 1.74, DRAW: 4.8, TEAM_B: 2.45 },
-    tags: ['HOT'],
-    banner: 'https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=1200&h=800&fit=crop',
-  },
-  {
-    id: 'sport-5',
-    league: 'Elite Showdown',
-    sport: 'Football',
-    teamA: 'Kerala Titans',
-    teamB: 'Kolkata Force',
-    predictionOdds: { TEAM_A: 2.02, DRAW: 3.1, TEAM_B: 2.04 },
-    tags: ['PREMIUM'],
-    banner: 'https://images.unsplash.com/photo-1508098682722-e99c643e7485?w=1200&h=800&fit=crop',
-  },
+const SPORTS_DB_BASE = 'https://www.thesportsdb.com/api/v1/json/3';
+const CACHE_MS = 60 * 1000;
+const LEAGUES = [
+  { id: '4460', sport: 'Cricket', label: 'Indian Premier League', season: '2026' },
+  { id: '4463', sport: 'Cricket', label: 'English T20 Blast', season: '2026' },
+  { id: '5529', sport: 'Cricket', label: 'Bangladesh Premier League', season: '2025-2026' },
+  { id: '5176', sport: 'Cricket', label: 'Caribbean Premier League', season: '2026' },
 ];
 
-function getCycleStart() {
+let cache = {
+  expiresAt: 0,
+  matches: [],
+  byId: new Map(),
+};
+
+function normalizeStatus(status, startTime, endTime) {
+  const value = (status || '').toLowerCase();
   const now = Date.now();
-  return now - (now % MATCH_INTERVAL_MS);
+  const start = new Date(startTime).getTime();
+  const end = endTime ? new Date(endTime).getTime() : start + 2 * 60 * 60 * 1000;
+
+  if (value.includes('not started')) return 'SCHEDULED';
+  if (value.includes('match finished') || value.includes('ft') || value.includes('after pen') || value.includes('ended')) return 'COMPLETED';
+  if (now < start) return 'SCHEDULED';
+  if (now >= start && now <= end) return 'LIVE';
+  return 'COMPLETED';
 }
 
-function determineResult(matchId) {
-  const sum = matchId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const outcomes = ['TEAM_A', 'TEAM_B', 'DRAW'];
-  return outcomes[sum % outcomes.length];
+function deriveResult(event) {
+  const home = Number(event.intHomeScore);
+  const away = Number(event.intAwayScore);
+  if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+  if (home > away) return 'TEAM_A';
+  if (away > home) return 'TEAM_B';
+  return 'DRAW';
 }
 
-function buildMatches() {
-  const cycleStart = getCycleStart();
-  return baseMatches.map((match, index) => {
-    const startTime = new Date(cycleStart + index * 90 * 1000);
-    const endTime = new Date(startTime.getTime() + MATCH_DURATION_MS);
-    const now = Date.now();
-    const result = determineResult(match.id);
-    const status = now < startTime.getTime() ? 'SCHEDULED' : now < endTime.getTime() ? 'LIVE' : 'COMPLETED';
+function deriveOdds(event) {
+  const seed = String(event.idEvent || '')
+    .split('')
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
 
-    return {
-      ...match,
-      startTime,
-      endTime,
-      result: status === 'COMPLETED' ? result : null,
-      status,
-      playersCount: 120 + index * 31,
-    };
+  const swing = (seed % 13) / 100;
+  return {
+    TEAM_A: Number((1.72 + swing).toFixed(2)),
+    DRAW: Number((3.1 + (seed % 7) / 10).toFixed(2)),
+    TEAM_B: Number((1.88 + ((seed + 5) % 11) / 100).toFixed(2)),
+  };
+}
+
+function normalizeEvent(event, league) {
+  const startTime = event.strTimestamp || `${event.dateEvent}T${event.strTime || '00:00:00'}`;
+  const endTime = new Date(new Date(startTime).getTime() + 2 * 60 * 60 * 1000).toISOString();
+  const status = normalizeStatus(event.strStatus, startTime, endTime);
+
+  return {
+    id: event.idEvent,
+    source: 'TheSportsDB',
+    league: event.strLeague || league.label,
+    sport: event.strSport || league.sport,
+    teamA: event.strHomeTeam,
+    teamB: event.strAwayTeam,
+    teamABadge: event.strHomeTeamBadge || null,
+    teamBBadge: event.strAwayTeamBadge || null,
+    startTime,
+    endTime,
+    status,
+    result: status === 'COMPLETED' ? deriveResult(event) : null,
+    homeScore: event.intHomeScore,
+    awayScore: event.intAwayScore,
+    venue: event.strVenue || '',
+    country: event.strCountry || '',
+    playersCount: 100 + ((Number(event.idEvent || 0) || 0) % 250),
+    predictionOdds: deriveOdds(event),
+    tags: [status === 'LIVE' ? 'LIVE' : 'HOT', 'PREMIUM'],
+    banner: event.strThumb || event.strBanner || event.strPoster || 'https://images.unsplash.com/photo-1547347298-4074fc3086f0?w=1200&h=800&fit=crop',
+  };
+}
+
+async function fetchLeagueEvents(league) {
+  let merged = [];
+
+  if (league.sport === 'Cricket') {
+    const seasonRes = await fetch(`${SPORTS_DB_BASE}/eventsseason.php?id=${league.id}&s=${encodeURIComponent(league.season)}`);
+    const seasonJson = seasonRes.ok ? await seasonRes.json() : { events: [] };
+    merged = seasonJson.events || [];
+  } else {
+    const [nextRes, lastRes] = await Promise.all([
+      fetch(`${SPORTS_DB_BASE}/eventsnextleague.php?id=${league.id}`),
+      fetch(`${SPORTS_DB_BASE}/eventslastleague.php?id=${league.id}`),
+    ]);
+
+    const nextJson = nextRes.ok ? await nextRes.json() : { events: [] };
+    const lastJson = lastRes.ok ? await lastRes.json() : { events: [] };
+    merged = [...(nextJson.events || []), ...(lastJson.events || [])];
+  }
+
+  return merged
+    .filter((event) => event?.idEvent && event?.strHomeTeam && event?.strAwayTeam)
+    .map((event) => normalizeEvent(event, league));
+}
+
+async function loadMatches() {
+  if (Date.now() < cache.expiresAt && cache.matches.length > 0) {
+    return cache;
+  }
+
+  const bundles = await Promise.allSettled(LEAGUES.map(fetchLeagueEvents));
+  const events = bundles
+    .filter((item) => item.status === 'fulfilled')
+    .flatMap((item) => item.value);
+
+  const deduped = [];
+  const byId = new Map();
+  for (const match of events) {
+    if (byId.has(match.id)) continue;
+    byId.set(match.id, match);
+    deduped.push(match);
+  }
+
+  deduped.sort((a, b) => {
+    const distanceA = Math.abs(new Date(a.startTime).getTime() - Date.now());
+    const distanceB = Math.abs(new Date(b.startTime).getTime() - Date.now());
+    return distanceA - distanceB;
   });
+  cache = {
+    expiresAt: Date.now() + CACHE_MS,
+    matches: deduped.slice(0, 24),
+    byId,
+  };
+
+  return cache;
 }
 
 async function ensureSportGame() {
   const game = await prisma.game.findFirst({ where: { name: 'Sport' } });
-  if (!game) {
-    throw new Error('Sport game is not available');
-  }
+  if (!game) throw new Error('Sport game is not available');
   return game;
-}
-
-function getMatchById(matchId) {
-  return buildMatches().find((match) => match.id === matchId);
 }
 
 async function settlePendingBets(userId = null) {
   const sportGame = await ensureSportGame();
-  const where = {
-    gameId: sportGame.id,
-    status: 'PENDING',
-  };
+  const matchBundle = await loadMatches();
+
+  const where = { gameId: sportGame.id, status: 'PENDING' };
   if (userId) where.userId = userId;
 
   const pendingBets = await prisma.gameBet.findMany({ where, orderBy: { createdAt: 'asc' } });
   for (const bet of pendingBets) {
     const meta = bet.selection ? JSON.parse(bet.selection) : {};
-    const match = getMatchById(meta.matchId);
-    if (!match || match.status !== 'COMPLETED') continue;
+    const match = matchBundle.byId.get(meta.matchId);
+    if (!match || match.status !== 'COMPLETED' || !match.result) continue;
 
     const isWin = meta.prediction === match.result;
     const reward = isWin ? Number((bet.amount * (bet.odds || 1)).toFixed(2)) : 0;
@@ -126,7 +166,7 @@ async function settlePendingBets(userId = null) {
         data: {
           status: isWin ? 'WIN' : 'LOSS',
           winAmount: reward,
-          selection: JSON.stringify({ ...meta, result: match.result }),
+          selection: JSON.stringify({ ...meta, result: match.result, homeScore: match.homeScore, awayScore: match.awayScore }),
         },
       });
 
@@ -152,10 +192,7 @@ async function settlePendingBets(userId = null) {
           },
         });
       } else {
-        await tx.user.update({
-          where: { id: bet.userId },
-          data: { gamesPlayed: { increment: 1 } },
-        });
+        await tx.user.update({ where: { id: bet.userId }, data: { gamesPlayed: { increment: 1 } } });
       }
 
       await tx.gameHistory.create({
@@ -171,6 +208,7 @@ async function settlePendingBets(userId = null) {
             ...meta,
             result: match.result,
             teams: `${match.teamA} vs ${match.teamB}`,
+            score: `${match.homeScore ?? '-'}-${match.awayScore ?? '-'}`,
           }),
         },
       });
@@ -181,20 +219,22 @@ async function settlePendingBets(userId = null) {
 export async function getSportMatches(userId) {
   await settlePendingBets(userId);
   const sportGame = await ensureSportGame();
-  const myPending = await prisma.gameBet.findMany({
+  const matchBundle = await loadMatches();
+  const myBets = await prisma.gameBet.findMany({
     where: { userId, gameId: sportGame.id },
     orderBy: { createdAt: 'desc' },
     take: 50,
   });
+
   const byMatch = new Map();
-  myPending.forEach((bet) => {
+  myBets.forEach((bet) => {
     const meta = bet.selection ? JSON.parse(bet.selection) : {};
-    if (!byMatch.has(meta.matchId)) {
+    if (meta.matchId && !byMatch.has(meta.matchId)) {
       byMatch.set(meta.matchId, { ...bet, meta });
     }
   });
 
-  return buildMatches().map((match) => ({
+  return matchBundle.matches.map((match) => ({
     ...match,
     myBet: byMatch.has(match.id)
       ? {
@@ -209,10 +249,17 @@ export async function getSportMatches(userId) {
   }));
 }
 
+export async function getSportMatchesPublic() {
+  const matchBundle = await loadMatches();
+  return matchBundle.matches;
+}
+
 export async function placeSportBet(userId, { matchId, prediction, betAmount }) {
   await settlePendingBets(userId);
   const sportGame = await ensureSportGame();
-  const match = getMatchById(matchId);
+  const matchBundle = await loadMatches();
+  const match = matchBundle.byId.get(matchId);
+
   if (!match) throw new Error('Match not found');
   if (match.status !== 'SCHEDULED') throw new Error('Betting is closed for this match');
   if (!['TEAM_A', 'TEAM_B', 'DRAW'].includes(prediction)) throw new Error('Invalid prediction');
@@ -226,7 +273,7 @@ export async function placeSportBet(userId, { matchId, prediction, betAmount }) 
       userId,
       gameId: sportGame.id,
       status: 'PENDING',
-      selection: { contains: `"matchId":"${matchId}"` },
+      roundId: matchId,
     },
   });
   if (existing) throw new Error('You already placed a prediction for this match');
@@ -236,10 +283,7 @@ export async function placeSportBet(userId, { matchId, prediction, betAmount }) 
   const balanceAfter = user.balance - betAmount;
 
   const bet = await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: userId },
-      data: { balance: balanceAfter },
-    });
+    await tx.user.update({ where: { id: userId }, data: { balance: balanceAfter } });
     await tx.coinTransaction.create({
       data: {
         userId,
@@ -264,18 +308,14 @@ export async function placeSportBet(userId, { matchId, prediction, betAmount }) 
           teamA: match.teamA,
           teamB: match.teamB,
           startTime: match.startTime,
+          source: match.source,
+          league: match.league,
         }),
       },
     });
   });
 
-  return {
-    betId: bet.id,
-    balanceAfter,
-    matchId,
-    odds,
-    prediction,
-  };
+  return { betId: bet.id, balanceAfter, matchId, odds, prediction };
 }
 
 export async function getSportBetHistory(userId, limit = 20) {
@@ -299,6 +339,7 @@ export async function getSportBetHistory(userId, limit = 20) {
       odds: bet.odds,
       status: bet.status,
       reward: bet.winAmount || 0,
+      score: meta.homeScore !== undefined ? `${meta.homeScore}-${meta.awayScore}` : null,
       createdAt: bet.createdAt,
     };
   });

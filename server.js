@@ -26,6 +26,7 @@ import { PrismaClient } from '@prisma/client';
 import { depositService } from './src/services/depositService.js';
 import { bonusService } from './src/services/bonusService.js';
 import { initializeSocket } from './src/services/socketService.js';
+import { isDatabaseUnavailable, logDatabaseWarningOnce } from './src/utils/databaseFallback.js';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -118,6 +119,10 @@ async function createSuperAdmin() {
       console.log('ℹ️  SUPER_ADMIN already exists');
     }
   } catch (error) {
+    if (isDatabaseUnavailable(error)) {
+      logDatabaseWarningOnce('startup:create-super-admin', error);
+      return;
+    }
     console.error('Failed to create super admin:', error);
   }
 }
@@ -173,6 +178,10 @@ async function seedData() {
       console.log('✅ Achievements seeded');
     }
   } catch (error) {
+    if (isDatabaseUnavailable(error)) {
+      logDatabaseWarningOnce('startup:seed-data', error);
+      return;
+    }
     console.error('Failed to seed data:', error);
   }
 }

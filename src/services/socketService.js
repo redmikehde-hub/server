@@ -3,9 +3,11 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { initializeAviator, getAviatorStateForUser } from './aviatorService.js';
+import { getSportMatchesPublic } from './sportPredictionService.js';
 
 const prisma = new PrismaClient();
 let io;
+let sportBroadcastInterval = null;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -31,6 +33,7 @@ export function initializeSocket(server) {
   });
 
   initializeAviator(io);
+  initializeSportBroadcast();
 
   io.use(async (socket, next) => {
     try {
@@ -73,6 +76,20 @@ export function initializeSocket(server) {
 
     socket.on('aviator:leave', () => {
       socket.leave('aviator');
+    });
+
+    socket.on('sport:join', async () => {
+      socket.join('sport');
+      try {
+        const matches = await getSportMatchesPublic();
+        socket.emit('sport:matches', { matches, updatedAt: new Date().toISOString() });
+      } catch (error) {
+        socket.emit('error', { message: 'Failed to load live sport matches' });
+      }
+    });
+
+    socket.on('sport:leave', () => {
+      socket.leave('sport');
     });
 
     socket.on('join_matchmaking', async ({ betAmount }) => {
@@ -256,6 +273,25 @@ export function initializeSocket(server) {
   });
 
   return io;
+}
+
+function initializeSportBroadcast() {
+  if (sportBroadcastInterval) return;
+
+  const broadcast = async () => {
+    try {
+      const matches = await getSportMatchesPublic();
+      io?.to('sport').emit('sport:matches', {
+        matches,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Sport broadcast error:', error.message);
+    }
+  };
+
+  broadcast();
+  sportBroadcastInterval = setInterval(broadcast, 30000);
 }
 
 function getInitialCoinState() {
